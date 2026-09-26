@@ -413,7 +413,7 @@
 
         /* --- LOGIKA SISTEM LOGIN --- */
 
-        // Data akun peserta (Akan diisi otomatis dari Google Sheets)
+        // Data akun peserta
         let usersData = [];
 
         const togglePasswordBtn = document.getElementById("togglePassword");
@@ -427,62 +427,86 @@
         const btnText = document.getElementById('btnText');
         const btnIcon = document.getElementById('btnIcon');
 
-        // ID Spreadsheet dari link yang diberikan
+        // ID Spreadsheet
         const sheetId = '19tElLN5g4pE959E55tZpr6dGyg4q_bpJyYIN-iS_ZXs';
         const sheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json`;
 
+        // Fungsi aman untuk mengambil nilai sel Google Sheets apa pun formatnya
+        function getCellValue(cell) {
+            if (!cell) return "";
+            if (cell.v !== undefined && cell.v !== null) return String(cell.v).trim();
+            if (cell.f !== undefined && cell.f !== null) return String(cell.f).trim();
+            return "";
+        }
+
         // Proses Fetch Data dari Google Sheets
         fetch(sheetUrl)
-            .then(res => res.text())
+            .then(res => {
+                if (!res.ok) throw new Error("Gagal terhubung ke server Google.");
+                return res.text();
+            })
             .then(text => {
                 const start = text.indexOf('{');
                 const end = text.lastIndexOf('}');
+                
+                if (start === -1 || end === -1) {
+                    throw new Error("Data ditolak. Pastikan akses Google Sheet diatur ke 'Siapa saja yang memiliki link'.");
+                }
+
                 const jsonString = text.substring(start, end + 1);
                 const data = JSON.parse(jsonString);
-                
                 const rows = data.table.rows;
                 
-                // Lewati baris pertama jika itu adalah header (misal mengandung kata "nama")
+                // Default Index Kolom (Jika tidak ada header)
+                let cNama = 0, cUser = 1, cPass = 2, cKelas = 3;
                 let startIndex = 0;
-                if (rows.length > 0 && rows[0].c[0] && rows[0].c[0].v && rows[0].c[0].v.toString().toLowerCase().includes('nama')) {
-                    startIndex = 1;
+
+                // Fitur Cerdas: Deteksi otomatis posisi kolom dari baris pertama (Header)
+                if (rows.length > 0 && rows[0].c) {
+                    const firstRow = rows[0].c;
+                    let isHeaderFound = false;
+                    for (let j = 0; j < firstRow.length; j++) {
+                        const headerVal = getCellValue(firstRow[j]).toLowerCase();
+                        if (headerVal.includes('nama')) { cNama = j; isHeaderFound = true; }
+                        else if (headerVal.includes('user') || headerVal.includes('nisn')) { cUser = j; isHeaderFound = true; }
+                        else if ((headerVal.includes('pass') || headerVal.includes('nis')) && !headerVal.includes('nisn')) { cPass = j; isHeaderFound = true; }
+                        else if (headerVal.includes('kelas')) { cKelas = j; isHeaderFound = true; }
+                    }
+                    if (isHeaderFound) startIndex = 1; // Lewati baris pertama saat memuat data user
                 }
 
                 // Masukkan data ke array usersData
                 for (let i = startIndex; i < rows.length; i++) {
                     const row = rows[i];
-                    if (row.c) {
-                        // Pastikan jika kolom kosong, diberi string kosong ""
-                        // Kolom A = index 0 (Nama)
-                        const nama = (row.c[0] && row.c[0].v) ? row.c[0].v.toString().trim() : "";
-                        // Kolom B = index 1 (Username)
-                        const user = (row.c[1] && row.c[1].v) ? row.c[1].v.toString().trim() : "";
-                        // Kolom C = index 2 (Password)
-                        const pass = (row.c[2] && row.c[2].v) ? row.c[2].v.toString().trim() : "";
-                        // Kolom D = index 3 (Kelas)
-                        const kelas = (row.c[3] && row.c[3].v) ? row.c[3].v.toString().trim() : "";
-                        
-                        // Hanya masukkan baris jika username dan password terisi
-                        if (user && pass) { 
-                            usersData.push({ nama, user, pass, kelas });
-                        }
+                    if (!row || !row.c) continue;
+
+                    const nama = getCellValue(row.c[cNama]);
+                    const user = getCellValue(row.c[cUser]);
+                    const pass = getCellValue(row.c[cPass]);
+                    const kelas = getCellValue(row.c[cKelas]);
+                    
+                    if (user && pass) { 
+                        usersData.push({ nama, user, pass, kelas });
                     }
                 }
                 
-                // Aktifkan kembali tombol login jika data sukses ditarik
+                console.log("Data Siswa Berhasil Dimuat:", usersData.length, "akun.");
+
+                // Aktifkan kembali tombol login
                 loginBtn.disabled = false;
                 btnText.textContent = 'LOGIN';
-                btnIcon.className = 'fa-solid fa-bolt';
+                btnIcon.className = 'fa-solid fa-right-to-bracket';
             })
             .catch(err => {
                 console.error("Error mengambil data:", err);
-                errorMessage.textContent = "Gagal memuat database siswa. Pastikan koneksi internet stabil.";
+                errorMessage.textContent = err.message.includes("Data ditolak") 
+                    ? err.message 
+                    : "Gagal memuat data. Pastikan koneksi internet lancar dan Link Sheet valid.";
                 errorMessage.style.display = "block";
                 
-                btnText.textContent = 'GAGAL MEMUAT DATA';
+                btnText.textContent = 'GAGAL MEMUAT';
                 btnIcon.className = 'fa-solid fa-triangle-exclamation';
             });
-
 
         // Toggle Password Visibility
         togglePasswordBtn.addEventListener("click", () => {
@@ -491,11 +515,6 @@
             
             eyeIcon.classList.toggle("fa-eye-slash", !isPassword);
             eyeIcon.classList.toggle("fa-eye", isPassword);
-            
-            togglePasswordBtn.setAttribute(
-                "aria-label", 
-                isPassword ? "Sembunyikan password" : "Tampilkan password"
-            );
         });
 
         // Event Login & Redirect berdasarkan Kelas
@@ -503,34 +522,47 @@
             e.preventDefault();
             errorMessage.style.display = "none";
 
-            const usernameInput = document.getElementById("username").value.trim();
+            // Username dibuat case-insensitive (tidak peduli huruf besar/kecil)
+            const usernameInput = document.getElementById("username").value.trim().toLowerCase();
             const passwordInputValue = passwordInput.value.trim();
 
             const foundUser = usersData.find(
-                (u) => u.user === usernameInput && u.pass === passwordInputValue
+                (u) => u.user.toLowerCase() === usernameInput && u.pass === passwordInputValue
             );
 
             if (foundUser) {
-                // Simpan nama agar tetap bisa dimunculkan di halaman selanjutnya
+                // Simpan nama agar bisa digunakan di halaman selanjutnya
                 sessionStorage.setItem("userNama", foundUser.nama);
                 
-                // --- LOGIKA REDIRECT BERDASARKAN KELAS ---
-                if (foundUser.kelas === "7") {
+                // --- LOGIKA REDIRECT LEBIH CERDAS ---
+                const userKelas = foundUser.kelas.toLowerCase();
+                
+                if (userKelas.includes("7") || userKelas.includes("vii")) {
                     window.location.href = "https://ekosantoso411-pixel.github.io/kelas-7/";
-                } else if (foundUser.kelas === "8") {
+                } else if (userKelas.includes("8") || userKelas.includes("viii")) {
                     window.location.href = "https://ekosantoso411-pixel.github.io/kelas-8/";
-                } else if (foundUser.kelas === "9") {
+                } else if (userKelas.includes("9") || userKelas.includes("ix")) {
                     window.location.href = "https://ekosantoso411-pixel.github.io/kelas-9/";
                 } else {
-                    // Fallback URL jika suatu saat ada akun yang tidak punya data kelas
+                    // Fallback jika tidak menemukan angka kelas
                     window.location.href = "https://ekosantoso411-pixel.github.io/halaman-login/";
                 }
 
             } else {
                 errorMessage.textContent = "USERNAME ATAU PASSWORD SALAH!";
                 errorMessage.style.display = "block";
+                
+                // Animasi getar saat gagal
+                loginForm.style.animation = "shake 0.4s ease";
+                setTimeout(() => { loginForm.style.animation = "none"; }, 400);
             }
         });
+        
+        // Menambahkan style keyframes untuk animasi shake jika login salah
+        const styleSheet = document.createElement("style");
+        styleSheet.innerText = `@keyframes shake { 0%, 100% {transform: translateX(0);} 25% {transform: translateX(-5px);} 75% {transform: translateX(5px);} }`;
+        document.head.appendChild(styleSheet);
+
     </script>
 
 </body>
