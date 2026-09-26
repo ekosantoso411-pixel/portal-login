@@ -340,9 +340,9 @@
                 </div>
             </div>
 
-            <button type="submit" class="btn-login" id="btnLogin">
-                <span id="btnText">MEMUAT DATA...</span>
-                <i id="btnIcon" class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>
+            <button type="submit" class="btn-login">
+                <span>LOGIN</span>
+                <i class="fa-solid fa-bolt" aria-hidden="true"></i>
             </button>
         </form>
     </main>
@@ -411,6 +411,8 @@
         initCanvas();
         drawParticles();
 
+
+
         /* --- LOGIKA SISTEM LOGIN --- */
 
         const togglePasswordBtn = document.getElementById("togglePassword");
@@ -419,42 +421,43 @@
         const loginForm = document.getElementById("loginForm");
         const errorMessage = document.getElementById("errorMessage");
         
-        const btnLogin = document.getElementById("btnLogin");
-        const btnText = document.getElementById("btnText");
-        const btnIcon = document.getElementById("btnIcon");
+        // Ambil elemen untuk manipulasi tombol loading
+        const btnLogin = document.querySelector(".btn-login");
+        const btnText = btnLogin.querySelector("span");
+        const btnIcon = btnLogin.querySelector("i");
 
+        // Data akun peserta akan diisi otomatis dari Google Sheets
         let usersData = [];
 
-        // ID Spreadsheet
+        // ID Spreadsheet Anda (diambil dari link yang Anda berikan)
         const sheetId = "19tElLN5g4pE959E55tZpr6dGyg4q_bpJyYIN-iS_ZXs";
-        
+        const sheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json`;
+
+        // Fungsi untuk mengambil data dari Google Sheet
         async function fetchGoogleSheetData() {
             try {
-                // Disable button and show loading state
+                // Ubah status tombol menjadi loading & cegah klik
                 btnLogin.disabled = true;
                 btnText.textContent = "MEMUAT DATA...";
                 btnIcon.className = "fa-solid fa-spinner fa-spin";
                 
-                // --- PERBAIKAN: CACHE-BUSTING ---
-                // Menambahkan parameter waktu agar selalu meminta data terbaru (bypass cache browser/google)
-                const cacheBuster = new Date().getTime();
-                const sheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&nocache=${cacheBuster}`;
-                
                 const response = await fetch(sheetUrl);
                 const text = await response.text();
                 
+                // Google Visualization API membungkus JSON di dalam sebuah fungsi (JSONP format)
+                // Kita perlu mengekstrak struktur JSON murninya
                 const jsonString = text.match(/google\.visualization\.Query\.setResponse\(([\s\S\w]+)\)/)[1];
                 const data = JSON.parse(jsonString);
                 
-                // --- PERBAIKAN: PARSING DATA LEBIH KUAT ---
+                // Format baris dari Sheet:
+                // Asumsi Urutan Kolom: A=Nama, B=Username/NISN, C=Password/NIS, D=Kelas
                 usersData = data.table.rows.map(row => {
-                    // Fungsi untuk mengambil nilai pasti, baik angka maupun teks, lalu dibersihkan spasinya
+                    // Fungsi helper untuk mengambil nilai sel, mengatasi baris/kolom kosong
                     const getVal = (col) => {
                         if (!col) return "";
-                        // Prioritaskan nilai mentah (v) lalu jadikan string, menghindari error f (formatted)
-                        if (col.v !== null && col.v !== undefined) {
-                            return String(col.v).trim();
-                        }
+                        // Gunakan col.f (formatted) jika ada, agar angka 0 di depan tidak hilang
+                        if (col.f) return String(col.f).trim();
+                        if (col.v !== null && col.v !== undefined) return String(col.v).trim();
                         return "";
                     };
                     
@@ -464,23 +467,20 @@
                         pass: row.c[2] ? getVal(row.c[2]) : "",
                         kelas: row.c[3] ? getVal(row.c[3]) : ""
                     };
-                }).filter(u => {
-                    // Abaikan baris kosong dan baris judul (header)
-                    if (u.user === "") return false;
-                    const lUser = u.user.toLowerCase();
-                    return lUser !== "username" && lUser !== "nisn" && lUser !== "username / nisn";
-                });
+                }).filter(u => u.user !== "" && u.user.toLowerCase() !== "username" && u.user.toLowerCase() !== "nisn");
+                // Filter di atas berfungsi untuk mengabaikan baris kosong dan baris judul (header)
 
-                console.log("Berhasil memuat data. Total user:", usersData.length);
+                // Log untuk cek di Console Browser jika ingin memastikan data masuk
+                console.log("Total Data Tersimpan:", usersData.length);
 
-                // Enable button
+                // Kembalikan status tombol ke normal jika berhasil memuat
                 btnLogin.disabled = false;
                 btnText.textContent = "LOGIN";
                 btnIcon.className = "fa-solid fa-bolt";
 
             } catch (error) {
                 console.error("Gagal memuat data dari Sheet:", error);
-                errorMessage.textContent = "Gagal terhubung ke database. Cek koneksi Anda.";
+                errorMessage.textContent = "Gagal terhubung ke database. Pastikan perangkat Anda terkoneksi internet.";
                 errorMessage.style.display = "block";
                 
                 btnText.textContent = "KONEKSI GAGAL";
@@ -488,10 +488,11 @@
             }
         }
 
-        // Fetch data immediately
+        // Jalankan pengambilan data seketika saat halaman dimuat
         fetchGoogleSheetData();
 
-        // Toggle Password
+
+        // Toggle Password Visibility
         togglePasswordBtn.addEventListener("click", () => {
             const isPassword = passwordInput.type === "password";
             passwordInput.type = isPassword ? "text" : "password";
@@ -505,51 +506,50 @@
             );
         });
 
-        // Login Submit
+        // Event Login & Redirect berdasarkan Kelas
         loginForm.addEventListener("submit", (e) => {
             e.preventDefault();
             errorMessage.style.display = "none";
 
-            const inputUsername = document.getElementById("username").value.trim();
-            const inputPassword = passwordInput.value.trim();
+            const usernameInput = document.getElementById("username").value.trim();
+            const passwordInputValue = passwordInput.value.trim();
 
-            // 1. Cari apakah username terdaftar
-            const userAccount = usersData.find(u => {
-                const sUser = u.user;
-                // Cocokkan username persis atau mengabaikan nol di depan jika tipe data beda
-                return (sUser === inputUsername) || (sUser === inputUsername.replace(/^0+/, ''));
-            });
+            const foundUser = usersData.find(
+                (u) => {
+                    // Menyamakan format (mengakali jika Google Sheet menghilangkan angka 0 di depan)
+                    const sheetUser = u.user;
+                    const sheetPass = u.pass;
+                    
+                    // Jika diketik pakai 0 (0135...) tapi di sheet hanya ada 135... tetap dianggap sama
+                    const isUserMatch = (sheetUser === usernameInput) || 
+                                        (sheetUser === usernameInput.replace(/^0+/, ''));
+                                        
+                    const isPassMatch = (sheetPass === passwordInputValue) || 
+                                        (sheetPass === passwordInputValue.replace(/^0+/, ''));
+                    
+                    return isUserMatch && isPassMatch;
+                }
+            );
 
-            // --- PERBAIKAN: PESAN ERROR LEBIH SPESIFIK ---
-            if (!userAccount) {
-                // Kasus: Username tidak ditemukan sama sekali di Sheet
-                errorMessage.textContent = "USERNAME TIDAK DITEMUKAN!";
-                errorMessage.style.display = "block";
-                return; // Hentikan proses
-            }
+            if (foundUser) {
+                // Simpan nama agar tetap bisa dimunculkan di halaman selanjutnya
+                sessionStorage.setItem("userNama", foundUser.nama);
+                
+                // --- LOGIKA REDIRECT BERDASARKAN KELAS ---
+                if (foundUser.kelas === "7") {
+                    window.location.href = "https://ekosantoso411-pixel.github.io/kelas-7/";
+                } else if (foundUser.kelas === "8") {
+                    window.location.href = "https://ekosantoso411-pixel.github.io/kelas-8/";
+                } else if (foundUser.kelas === "9") {
+                    window.location.href = "https://ekosantoso411-pixel.github.io/kelas-9/";
+                } else {
+                    // Fallback URL jika suatu saat ada akun yang tidak punya data kelas
+                    window.location.href = "https://ekosantoso411-pixel.github.io/halaman-login/";
+                }
 
-            // 2. Cek apakah password cocok dengan username yang ditemukan
-            const sPass = userAccount.pass;
-            const isPasswordMatch = (sPass === inputPassword) || (sPass === inputPassword.replace(/^0+/, ''));
-
-            if (!isPasswordMatch) {
-                // Kasus: Username ada, tapi password salah
-                errorMessage.textContent = "PASSWORD SALAH!";
-                errorMessage.style.display = "block";
-                return; // Hentikan proses
-            }
-
-            // 3. Jika berhasil melewati pengecekan di atas, berarti Login Sukses
-            sessionStorage.setItem("userNama", userAccount.nama);
-            
-            if (userAccount.kelas === "7") {
-                window.location.href = "https://ekosantoso411-pixel.github.io/kelas-7/";
-            } else if (userAccount.kelas === "8") {
-                window.location.href = "https://ekosantoso411-pixel.github.io/kelas-8/";
-            } else if (userAccount.kelas === "9") {
-                window.location.href = "https://ekosantoso411-pixel.github.io/kelas-9/";
             } else {
-                window.location.href = "https://ekosantoso411-pixel.github.io/halaman-login/";
+                errorMessage.textContent = "USERNAME ATAU PASSWORD SALAH!";
+                errorMessage.style.display = "block";
             }
         });
     </script>
