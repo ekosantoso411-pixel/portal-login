@@ -411,7 +411,7 @@
         drawParticles();
 
 
-        /* --- LOGIKA SISTEM LOGIN OTOMATIS DARI GOOGLE SHEET --- */
+        /* --- LOGIKA LOGIN DARI GOOGLE SHEET --- */
 
         let usersData = [];
 
@@ -425,23 +425,27 @@
         const btnText = document.getElementById("btnText");
         const btnIcon = document.getElementById("btnIcon");
 
-        /*
-         * GOOGLE SHEET
-         * Sheet harus dapat dilihat oleh "Siapa saja yang memiliki link".
-         * Format kolom:
-         * Nama | Username | Password | Kelas | URL Tujuan | Status
-         */
+        /* ID Spreadsheet - membaca sheet pertama, tanpa nama tab */
         const sheetId = '19tElLN5g4pE959E55tZpr6dGyg4q_bpJyYIN-iS_ZXs';
-        const sheetName = 'USERS';
-
         const sheetUrl =
-            `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq` +
-            `?sheet=${encodeURIComponent(sheetName)}&tqx=out:json`;
+            `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json`;
 
+        /*
+         * Gunakan nilai TERFORMAT (cell.f) terlebih dahulu.
+         * Ini penting untuk Username/NISN seperti 0136172077.
+         * Jika cell.v dipakai lebih dahulu, angka 0 di depan bisa hilang.
+         */
         function getCellValue(cell) {
             if (!cell) return "";
-            if (cell.v !== undefined && cell.v !== null) return String(cell.v).trim();
-            if (cell.f !== undefined && cell.f !== null) return String(cell.f).trim();
+
+            if (cell.f !== undefined && cell.f !== null) {
+                return String(cell.f).trim();
+            }
+
+            if (cell.v !== undefined && cell.v !== null) {
+                return String(cell.v).trim();
+            }
+
             return "";
         }
 
@@ -459,7 +463,15 @@
             errorMessage.style.display = "none";
         }
 
-        /* Membaca Google Sheet */
+        /*
+         * Struktur Sheet sesuai screenshot:
+         * A = Nama
+         * B = Username
+         * C = Password
+         * D = Kelas
+         * E = URL Tujuan
+         * F = Status
+         */
         fetch(sheetUrl, { cache: "no-store" })
             .then(res => {
                 if (!res.ok) {
@@ -468,18 +480,19 @@
                 return res.text();
             })
             .then(text => {
-                const startJson = text.indexOf('{');
-                const endJson = text.lastIndexOf('}');
+                const startJson = text.indexOf("{");
+                const endJson = text.lastIndexOf("}");
 
                 if (startJson === -1 || endJson === -1) {
                     throw new Error(
                         "Data Google Sheet tidak terbaca. " +
-                        "Pastikan Sheet dapat diakses oleh siapa saja yang memiliki link."
+                        "Pastikan akses Sheet dapat dilihat oleh pengguna yang memiliki link."
                     );
                 }
 
-                const jsonString = text.substring(startJson, endJson + 1);
-                const data = JSON.parse(jsonString);
+                const data = JSON.parse(
+                    text.substring(startJson, endJson + 1)
+                );
 
                 if (!data.table || !data.table.rows) {
                     throw new Error("Struktur data Google Sheet tidak ditemukan.");
@@ -487,78 +500,22 @@
 
                 const rows = data.table.rows;
 
-                /*
-                 * Header yang disarankan:
-                 * Nama, Username, Password, Kelas, URL Tujuan, Status
-                 */
-                if (rows.length === 0) {
-                    throw new Error("Google Sheet belum memiliki data.");
+                if (rows.length < 2) {
+                    throw new Error("Data siswa belum ditemukan.");
                 }
 
-                const header = rows[0].c || [];
-
-                let cNama = -1;
-                let cUser = -1;
-                let cPass = -1;
-                let cKelas = -1;
-                let cUrl = -1;
-                let cStatus = -1;
-
-                header.forEach((cell, index) => {
-                    const h = normalize(getCellValue(cell));
-
-                    if (h === "nama" || h.includes("nama siswa")) {
-                        cNama = index;
-                    } else if (
-                        h === "username" ||
-                        h === "user" ||
-                        h === "nisn"
-                    ) {
-                        cUser = index;
-                    } else if (
-                        h === "password" ||
-                        h === "pass" ||
-                        h === "nis"
-                    ) {
-                        cPass = index;
-                    } else if (h === "kelas" || h === "class") {
-                        cKelas = index;
-                    } else if (
-                        h === "url tujuan" ||
-                        h === "url" ||
-                        h === "tujuan" ||
-                        h === "link"
-                    ) {
-                        cUrl = index;
-                    } else if (
-                        h === "status" ||
-                        h === "aktif"
-                    ) {
-                        cStatus = index;
-                    }
-                });
-
-                /*
-                 * Jika header tidak cocok, gunakan posisi kolom:
-                 * A Nama
-                 * B Username
-                 * C Password
-                 * D Kelas
-                 * E URL Tujuan
-                 * F Status
-                 */
-                if (cNama === -1) cNama = 0;
-                if (cUser === -1) cUser = 1;
-                if (cPass === -1) cPass = 2;
-                if (cKelas === -1) cKelas = 3;
-                if (cUrl === -1) cUrl = 4;
-                if (cStatus === -1) cStatus = 5;
+                const cNama = 0;
+                const cUser = 1;
+                const cPass = 2;
+                const cKelas = 3;
+                const cUrl = 4;
+                const cStatus = 5;
 
                 usersData = [];
 
+                /* Baris 1 = header; data dimulai dari baris 2 */
                 for (let i = 1; i < rows.length; i++) {
                     const row = rows[i];
-
                     if (!row || !row.c) continue;
 
                     const nama = getCellValue(row.c[cNama]);
@@ -568,10 +525,6 @@
                     const url = getCellValue(row.c[cUrl]);
                     const status = getCellValue(row.c[cStatus]);
 
-                    /*
-                     * Baris kosong tidak dimasukkan.
-                     * Akun hanya dianggap valid jika username dan password ada.
-                     */
                     if (!user || !pass) continue;
 
                     usersData.push({
@@ -585,21 +538,25 @@
                 }
 
                 console.log(
-                    "Data siswa berhasil dimuat:",
+                    "SMART CBT:",
                     usersData.length,
-                    "akun."
+                    "akun berhasil dimuat."
                 );
+
+                if (usersData.length === 0) {
+                    throw new Error("Tidak ada akun siswa yang valid.");
+                }
 
                 loginBtn.disabled = false;
                 btnText.textContent = "LOGIN";
                 btnIcon.className = "fa-solid fa-right-to-bracket";
             })
             .catch(err => {
-                console.error("Error mengambil data:", err);
+                console.error("SMART CBT - Gagal mengambil data:", err);
 
                 showError(
-                    err.message ||
-                    "Gagal memuat data Google Sheet."
+                    "Gagal memuat data siswa. " +
+                    "Periksa akses Google Sheet dan koneksi internet."
                 );
 
                 btnText.textContent = "GAGAL MEMUAT";
@@ -610,50 +567,37 @@
         /* Toggle password */
         togglePasswordBtn.addEventListener("click", () => {
             const isPassword = passwordInput.type === "password";
-
             passwordInput.type = isPassword ? "text" : "password";
 
-            eyeIcon.classList.toggle(
-                "fa-eye-slash",
-                !isPassword
-            );
-
-            eyeIcon.classList.toggle(
-                "fa-eye",
-                isPassword
-            );
+            eyeIcon.classList.toggle("fa-eye-slash", !isPassword);
+            eyeIcon.classList.toggle("fa-eye", isPassword);
         });
 
-        /* Proses Login */
+        /* Login */
         loginForm.addEventListener("submit", (e) => {
             e.preventDefault();
             hideError();
 
-            if (usersData.length === 0) {
-                showError("Data akun belum berhasil dimuat.");
+            if (!usersData.length) {
+                showError("Data siswa belum berhasil dimuat.");
                 return;
             }
 
             const usernameInput =
-                document.getElementById("username")
-                    .value
-                    .trim()
-                    .toLowerCase();
+                document.getElementById("username").value.trim().toLowerCase();
 
             const passwordInputValue =
                 passwordInput.value.trim();
 
-            const foundUser = usersData.find(
-                u =>
-                    normalize(u.user) === usernameInput &&
-                    u.pass === passwordInputValue
+            const foundUser = usersData.find(u =>
+                normalize(u.user) === usernameInput &&
+                String(u.pass).trim() === passwordInputValue
             );
 
             if (!foundUser) {
                 showError("USERNAME ATAU PASSWORD SALAH!");
 
                 loginForm.style.animation = "shake 0.4s ease";
-
                 setTimeout(() => {
                     loginForm.style.animation = "none";
                 }, 400);
@@ -661,7 +605,7 @@
                 return;
             }
 
-            /* Cek status akun */
+            /* Status kosong = tetap diizinkan */
             const status = normalize(foundUser.status);
 
             if (
@@ -676,85 +620,43 @@
                 return;
             }
 
-            /*
-             * Simpan informasi siswa untuk halaman berikutnya.
-             */
-            sessionStorage.setItem(
-                "userNama",
-                foundUser.nama
-            );
+            /* Simpan data siswa */
+            sessionStorage.setItem("userNama", foundUser.nama);
+            sessionStorage.setItem("userUsername", foundUser.user);
+            sessionStorage.setItem("userKelas", foundUser.kelas);
 
-            sessionStorage.setItem(
-                "userUsername",
-                foundUser.user
-            );
-
-            sessionStorage.setItem(
-                "userKelas",
-                foundUser.kelas
-            );
-
-            /*
-             * REDIRECT OTOMATIS BERDASARKAN URL DI GOOGLE SHEET.
-             *
-             * Jika kolom URL Tujuan diisi:
-             * https://contoh.com/kelas-7/
-             *
-             * maka siswa langsung diarahkan ke alamat tersebut.
-             */
+            /* Prioritas utama: URL Tujuan dari Google Sheet */
             if (foundUser.url) {
                 window.location.href = foundUser.url;
                 return;
             }
 
-            /*
-             * Jika URL kosong, gunakan fallback berdasarkan kelas.
-             * Bagian ini hanya cadangan agar sistem tetap berjalan.
-             */
+            /* Fallback berdasarkan kelas jika URL Tujuan kosong */
             const userKelas = normalize(foundUser.kelas);
 
-            if (
-                userKelas.includes("7") ||
-                userKelas.includes("vii")
-            ) {
+            if (userKelas.includes("7") || userKelas.includes("vii")) {
                 window.location.href =
                     "https://ekosantoso411-pixel.github.io/kelas-7/";
-            } else if (
-                userKelas.includes("8") ||
-                userKelas.includes("viii")
-            ) {
+            } else if (userKelas.includes("8") || userKelas.includes("viii")) {
                 window.location.href =
                     "https://ekosantoso411-pixel.github.io/kelas-8/";
-            } else if (
-                userKelas.includes("9") ||
-                userKelas.includes("ix")
-            ) {
+            } else if (userKelas.includes("9") || userKelas.includes("ix")) {
                 window.location.href =
                     "https://ekosantoso411-pixel.github.io/kelas-9/";
             } else {
-                showError(
-                    "URL tujuan untuk akun ini belum diatur di Google Sheet."
-                );
+                showError("URL Tujuan untuk akun ini belum diatur.");
             }
         });
 
         /* Animasi shake */
         const styleSheet = document.createElement("style");
-
         styleSheet.innerText = `
             @keyframes shake {
-                0%, 100% {
-                    transform: translateX(0);
-                }
-                25% {
-                    transform: translateX(-5px);
-                }
-                75% {
-                    transform: translateX(5px);
-                }
+                0%, 100% { transform: translateX(0); }
+                25% { transform: translateX(-5px); }
+                75% { transform: translateX(5px); }
             }
         `;
-
         document.head.appendChild(styleSheet);
 
     </script>
