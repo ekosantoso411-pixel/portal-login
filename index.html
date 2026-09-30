@@ -16,7 +16,6 @@
             font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
         }
 
-        /* Pengaturan Layout Utama agar Tidak Terpotong & Presisi */
         html {
             width: 100%;
             height: 100%;
@@ -80,7 +79,7 @@
             100% { top: 100%; opacity: 0; }
         }
 
-        /* --- KOTAK LOGIN (RESPONSIF & RESPONSIVE DESIGN) --- */
+        /* --- KONTEN FORM LOGIN --- */
         .login-container {
             width: 100%;
             max-width: 390px;
@@ -136,12 +135,6 @@
             box-shadow: 0 0 20px rgba(0, 242, 254, 0.3);
         }
 
-        .logo-box i {
-            font-size: 28px;
-            color: #00f2fe;
-            text-shadow: 0 0 10px rgba(0, 242, 254, 0.8);
-        }
-
         .title {
             text-align: center;
             color: #ffffff;
@@ -169,6 +162,17 @@
             font-size: 13px;
             margin-bottom: 20px;
             text-align: center;
+        }
+
+        .status-sync {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            font-size: 11px;
+            color: #38bdf8;
+            margin-bottom: 14px;
+            opacity: 0.85;
         }
 
         .form-group {
@@ -277,13 +281,6 @@
             transform: translateY(0);
         }
 
-        .btn-login:disabled {
-            background: linear-gradient(135deg, #475569 0%, #334155 100%);
-            box-shadow: none;
-            cursor: not-allowed;
-            opacity: 0.7;
-        }
-
         @media (max-width: 480px) {
             body {
                 padding: 16px !important;
@@ -304,7 +301,6 @@
 </head>
 
 <body>
-
     <canvas id="tech-canvas"></canvas>
     <div class="cyber-grid"></div>
     <div class="scanline"></div>
@@ -316,6 +312,11 @@
 
         <h1 class="title">SMART CBT</h1>
         <p class="subtitle">Sistem Ujian Berbasis Komputer</p>
+
+        <div id="syncStatus" class="status-sync">
+            <i class="fa-solid fa-arrows-rotate fa-spin"></i>
+            <span>Menyinkronkan data via Google Apps Script...</span>
+        </div>
 
         <div id="errorMessage" class="error-message"></div>
 
@@ -339,15 +340,14 @@
                 </div>
             </div>
 
-            <button type="submit" class="btn-login" id="loginBtn" disabled>
-                <span id="btnText">MEMUAT DATA...</span>
-                <i class="fa-solid fa-spinner fa-spin" id="btnIcon" aria-hidden="true"></i>
+            <button type="submit" class="btn-login" id="btnLogin">
+                <span>LOGIN</span>
+                <i class="fa-solid fa-bolt" aria-hidden="true"></i>
             </button>
         </form>
     </main>
 
     <script>
-        /* --- ANIMASI JARINGAN PARTIKEL DATA (CANVAS) --- */
         const canvas = document.getElementById('tech-canvas');
         const ctx = canvas.getContext('2d');
         let particles = [];
@@ -410,10 +410,126 @@
         initCanvas();
         drawParticles();
 
-
-        /* --- LOGIKA LOGIN DARI GOOGLE SHEET --- */
+        // Ganti URL di bawah dengan URL Aplikasi Web (Web App) hasil deploy Google Apps Script Anda
+        const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxxDFFcio7vn5-OycL_py9pfzrNQGC3QVL-2mW58XxJta1UR07XlYv59Ui2XQxSlaqH/exec";
+        const GOOGLE_SHEET_ID = "10HpsICtJlSc6AHIJo9gyxu3VEaC6MYtfxaQxDfxv3lM";
+        const GOOGLE_SHEET_CSV_URL = `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Sheet1`;
 
         let usersData = [];
+        let isDataLoading = true;
+
+        // Data cadangan jika jaringan terputus
+        const fallbackUsersData = [
+            { nama: "Felisha Assyifa Putri", user: "0141361453", pass: "2865", kelas: "7" },
+            { nama: "Ghitsa Maylia Putri", user: "0135080621", pass: "2866", kelas: "7" },
+            { nama: "ANDREA QUEENETTA SYAKIRA", user: "0123683437", pass: "2698", kelas: "8" },
+            { nama: "ABRILIANA NAWITRI PRAWIRATAMA", user: "3123787099", pass: "2669", kelas: "9" }
+        ];
+
+        async function fetchUsersFromAppsScript() {
+            const syncStatusEl = document.getElementById("syncStatus");
+            
+            // 1. Coba ambil dari Google Apps Script jika URL sudah diisi
+            if (APPS_SCRIPT_URL && !APPS_SCRIPT_URL.includes("PASTE_URL_WEB_APP")) {
+                try {
+                    const response = await fetch(APPS_SCRIPT_URL);
+                    if (!response.ok) throw new Error("Gagal mengambil data dari Google Apps Script.");
+                    
+                    const resJson = await response.json();
+                    if (resJson.status === "success" && Array.isArray(resJson.data) && resJson.data.length > 0) {
+                        usersData = resJson.data;
+                        console.log(`[Smart CBT] Berhasil memuat ${usersData.length} akun siswa via Apps Script.`);
+                        if (syncStatusEl) {
+                            syncStatusEl.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#4ade80;"></i> <span style="color:#cbd5e1;">Terhubung ke GAS API (${usersData.length} siswa)</span>`;
+                        }
+                        isDataLoading = false;
+                        return;
+                    }
+                } catch (error) {
+                    console.warn("[Smart CBT] Gagal via Apps Script, mencoba fallback ke CSV Sheets:", error);
+                }
+            }
+
+            // 2. Fallback Direct CSV Google Sheets
+            try {
+                const response = await fetch(GOOGLE_SHEET_CSV_URL, { cache: "no-store" });
+                if (!response.ok) throw new Error("Gagal ekspor CSV.");
+                
+                const csvText = await response.text();
+                const parsedUsers = parseCSVToUsers(csvText);
+
+                if (parsedUsers && parsedUsers.length > 0) {
+                    usersData = parsedUsers;
+                    console.log(`[Smart CBT] Berhasil memuat ${usersData.length} akun via CSV Direct.`);
+                    if (syncStatusEl) {
+                        syncStatusEl.innerHTML = `<i class="fa-solid fa-circle-check" style="color:#4ade80;"></i> <span style="color:#cbd5e1;">Terhubung ke Google Sheets (${usersData.length} siswa)</span>`;
+                    }
+                } else {
+                    usersData = fallbackUsersData;
+                    if (syncStatusEl) syncStatusEl.style.display = "none";
+                }
+            } catch (err) {
+                console.error("[Smart CBT] Memakai data cadangan lokal:", err);
+                usersData = fallbackUsersData;
+                if (syncStatusEl) syncStatusEl.style.display = "none";
+            } finally {
+                isDataLoading = false;
+            }
+        }
+
+        function parseCSVToUsers(csvText) {
+            const lines = csvText.split(/\r\n|\n/).filter(line => line.trim() !== "");
+            if (lines.length < 2) return [];
+
+            const parseCSVLine = (line) => {
+                const result = [];
+                let current = '';
+                let inQuotes = false;
+                for (let i = 0; i < line.length; i++) {
+                    const char = line[i];
+                    if (char === '"') {
+                        inQuotes = !inQuotes;
+                    } else if (char === ',' && !inQuotes) {
+                        result.push(current.trim().replace(/^"|"$/g, ''));
+                        current = '';
+                    } else {
+                        current += char;
+                    }
+                }
+                result.push(current.trim().replace(/^"|"$/g, ''));
+                return result;
+            };
+
+            const rows = lines.map(parseCSVLine);
+            const headers = rows[0].map(h => h.toLowerCase().trim());
+
+            let namaIdx = headers.findIndex(h => h.includes('nama') || h.includes('name'));
+            let userIdx = headers.findIndex(h => h.includes('user') || h.includes('nisn') || h.includes('username'));
+            let passIdx = headers.findIndex(h => h.includes('pass') || h.includes('nis') || h.includes('password'));
+            let kelasIdx = headers.findIndex(h => h.includes('kelas') || h.includes('class'));
+
+            if (namaIdx === -1) namaIdx = 0;
+            if (userIdx === -1) userIdx = 1;
+            if (passIdx === -1) passIdx = 2;
+            if (kelasIdx === -1) kelasIdx = 3;
+
+            const users = [];
+            for (let i = 1; i < rows.length; i++) {
+                const row = rows[i];
+                if (!row[userIdx] && !row[passIdx]) continue;
+
+                users.push({
+                    nama: (row[namaIdx] || '').toString().trim(),
+                    user: (row[userIdx] || '').toString().trim(),
+                    pass: (row[passIdx] || '').toString().trim(),
+                    kelas: (row[kelasIdx] || '').toString().trim()
+                });
+            }
+            return users;
+        }
+
+        // Ambil data saat halaman dibuka
+        fetchUsersFromAppsScript();
 
         const togglePasswordBtn = document.getElementById("togglePassword");
         const passwordInput = document.getElementById("password");
@@ -421,245 +537,70 @@
         const loginForm = document.getElementById("loginForm");
         const errorMessage = document.getElementById("errorMessage");
 
-        const loginBtn = document.getElementById("loginBtn");
-        const btnText = document.getElementById("btnText");
-        const btnIcon = document.getElementById("btnIcon");
-
-        /* ID Spreadsheet - membaca sheet pertama, tanpa nama tab */
-        const sheetId = '19tElLN5g4pE959E55tZpr6dGyg4q_bpJyYIN-iS_ZXs';
-        const sheetUrl =
-            `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json`;
-
-        /*
-         * Gunakan nilai TERFORMAT (cell.f) terlebih dahulu.
-         * Ini penting untuk Username/NISN seperti 0136172077.
-         * Jika cell.v dipakai lebih dahulu, angka 0 di depan bisa hilang.
-         */
-        function getCellValue(cell) {
-            if (!cell) return "";
-
-            if (cell.f !== undefined && cell.f !== null) {
-                return String(cell.f).trim();
-            }
-
-            if (cell.v !== undefined && cell.v !== null) {
-                return String(cell.v).trim();
-            }
-
-            return "";
-        }
-
-        function normalize(value) {
-            return String(value ?? "").trim().toLowerCase();
-        }
-
-        function showError(message) {
-            errorMessage.textContent = message;
-            errorMessage.style.display = "block";
-        }
-
-        function hideError() {
-            errorMessage.textContent = "";
-            errorMessage.style.display = "none";
-        }
-
-        /*
-         * Struktur Sheet sesuai screenshot:
-         * A = Nama
-         * B = Username
-         * C = Password
-         * D = Kelas
-         * E = URL Tujuan
-         * F = Status
-         */
-        fetch(sheetUrl, { cache: "no-store" })
-            .then(res => {
-                if (!res.ok) {
-                    throw new Error("Google Sheet tidak dapat diakses.");
-                }
-                return res.text();
-            })
-            .then(text => {
-                const startJson = text.indexOf("{");
-                const endJson = text.lastIndexOf("}");
-
-                if (startJson === -1 || endJson === -1) {
-                    throw new Error(
-                        "Data Google Sheet tidak terbaca. " +
-                        "Pastikan akses Sheet dapat dilihat oleh pengguna yang memiliki link."
-                    );
-                }
-
-                const data = JSON.parse(
-                    text.substring(startJson, endJson + 1)
-                );
-
-                if (!data.table || !data.table.rows) {
-                    throw new Error("Struktur data Google Sheet tidak ditemukan.");
-                }
-
-                const rows = data.table.rows;
-
-                if (rows.length < 2) {
-                    throw new Error("Data siswa belum ditemukan.");
-                }
-
-                const cNama = 0;
-                const cUser = 1;
-                const cPass = 2;
-                const cKelas = 3;
-                const cUrl = 4;
-                const cStatus = 5;
-
-                usersData = [];
-
-                /* Baris 1 = header; data dimulai dari baris 2 */
-                for (let i = 1; i < rows.length; i++) {
-                    const row = rows[i];
-                    if (!row || !row.c) continue;
-
-                    const nama = getCellValue(row.c[cNama]);
-                    const user = getCellValue(row.c[cUser]);
-                    const pass = getCellValue(row.c[cPass]);
-                    const kelas = getCellValue(row.c[cKelas]);
-                    const url = getCellValue(row.c[cUrl]);
-                    const status = getCellValue(row.c[cStatus]);
-
-                    if (!user || !pass) continue;
-
-                    usersData.push({
-                        nama,
-                        user,
-                        pass,
-                        kelas,
-                        url,
-                        status
-                    });
-                }
-
-                console.log(
-                    "SMART CBT:",
-                    usersData.length,
-                    "akun berhasil dimuat."
-                );
-
-                if (usersData.length === 0) {
-                    throw new Error("Tidak ada akun siswa yang valid.");
-                }
-
-                loginBtn.disabled = false;
-                btnText.textContent = "LOGIN";
-                btnIcon.className = "fa-solid fa-right-to-bracket";
-            })
-            .catch(err => {
-                console.error("SMART CBT - Gagal mengambil data:", err);
-
-                showError(
-                    "Gagal memuat data siswa. " +
-                    "Periksa akses Google Sheet dan koneksi internet."
-                );
-
-                btnText.textContent = "GAGAL MEMUAT";
-                btnIcon.className = "fa-solid fa-triangle-exclamation";
-                loginBtn.disabled = true;
-            });
-
-        /* Toggle password */
+        // Toggle Password Visibility
         togglePasswordBtn.addEventListener("click", () => {
             const isPassword = passwordInput.type === "password";
             passwordInput.type = isPassword ? "text" : "password";
-
+            
             eyeIcon.classList.toggle("fa-eye-slash", !isPassword);
             eyeIcon.classList.toggle("fa-eye", isPassword);
+            
+            togglePasswordBtn.setAttribute(
+                "aria-label", 
+                isPassword ? "Sembunyikan password" : "Tampilkan password"
+            );
         });
 
-        /* Login */
+        // Helper pencocokan Username/NISN fleksibel
+        function isUserMatch(sheetUser, inputUser) {
+            const cleanSheet = String(sheetUser).trim();
+            const cleanInput = String(inputUser).trim();
+            
+            if (cleanSheet === cleanInput) return true;
+            
+            const numSheet = cleanSheet.replace(/^0+/, '');
+            const numInput = cleanInput.replace(/^0+/, '');
+            return numSheet !== "" && numSheet === numInput;
+        }
+
+        // Event Submit Login
         loginForm.addEventListener("submit", (e) => {
             e.preventDefault();
-            hideError();
+            errorMessage.style.display = "none";
 
-            if (!usersData.length) {
-                showError("Data siswa belum berhasil dimuat.");
+            if (isDataLoading) {
+                errorMessage.textContent = "SEDANG MENYINKRONKAN DATA DARI GOOGLE SHEETS, HARAP TUNGGU SEBENTAR...";
+                errorMessage.style.display = "block";
                 return;
             }
 
-            const usernameInput =
-                document.getElementById("username").value.trim().toLowerCase();
+            const usernameInput = document.getElementById("username").value.trim();
+            const passwordInputValue = passwordInput.value.trim();
 
-            const passwordInputValue =
-                passwordInput.value.trim();
-
-            const foundUser = usersData.find(u =>
-                normalize(u.user) === usernameInput &&
-                String(u.pass).trim() === passwordInputValue
+            const foundUser = usersData.find(
+                (u) => isUserMatch(u.user, usernameInput) && String(u.pass).trim() === passwordInputValue
             );
 
-            if (!foundUser) {
-                showError("USERNAME ATAU PASSWORD SALAH!");
+            if (foundUser) {
+                // Simpan nama siswa ke SessionStorage
+                sessionStorage.setItem("userNama", foundUser.nama);
+                
+                // REDIRECT BERDASARKAN KELAS
+                if (foundUser.kelas === "7") {
+                    window.location.href = "https://ekosantoso411-pixel.github.io/kelas-7/";
+                } else if (foundUser.kelas === "8") {
+                    window.location.href = "https://ekosantoso411-pixel.github.io/kelas-8/";
+                } else if (foundUser.kelas === "9") {
+                    window.location.href = "https://ekosantoso411-pixel.github.io/kelas-9/";
+                } else {
+                    window.location.href = "https://ekosantoso411-pixel.github.io/portal-login/";
+                }
 
-                loginForm.style.animation = "shake 0.4s ease";
-                setTimeout(() => {
-                    loginForm.style.animation = "none";
-                }, 400);
-
-                return;
-            }
-
-            /* Status kosong = tetap diizinkan */
-            const status = normalize(foundUser.status);
-
-            if (
-                status &&
-                status !== "aktif" &&
-                status !== "active" &&
-                status !== "ya"
-            ) {
-                showError(
-                    "AKUN ANDA TIDAK AKTIF. SILAKAN HUBUNGI ADMIN."
-                );
-                return;
-            }
-
-            /* Simpan data siswa */
-            sessionStorage.setItem("userNama", foundUser.nama);
-            sessionStorage.setItem("userUsername", foundUser.user);
-            sessionStorage.setItem("userKelas", foundUser.kelas);
-
-            /* Prioritas utama: URL Tujuan dari Google Sheet */
-            if (foundUser.url) {
-                window.location.href = foundUser.url;
-                return;
-            }
-
-            /* Fallback berdasarkan kelas jika URL Tujuan kosong */
-            const userKelas = normalize(foundUser.kelas);
-
-            if (userKelas.includes("7") || userKelas.includes("vii")) {
-                window.location.href =
-                    "https://ekosantoso411-pixel.github.io/kelas-7/";
-            } else if (userKelas.includes("8") || userKelas.includes("viii")) {
-                window.location.href =
-                    "https://ekosantoso411-pixel.github.io/kelas-8/";
-            } else if (userKelas.includes("9") || userKelas.includes("ix")) {
-                window.location.href =
-                    "https://ekosantoso411-pixel.github.io/kelas-9/";
             } else {
-                showError("URL Tujuan untuk akun ini belum diatur.");
+                errorMessage.textContent = "USERNAME ATAU PASSWORD SALAH!";
+                errorMessage.style.display = "block";
             }
         });
-
-        /* Animasi shake */
-        const styleSheet = document.createElement("style");
-        styleSheet.innerText = `
-            @keyframes shake {
-                0%, 100% { transform: translateX(0); }
-                25% { transform: translateX(-5px); }
-                75% { transform: translateX(5px); }
-            }
-        `;
-        document.head.appendChild(styleSheet);
-
     </script>
-
 </body>
 </html>
